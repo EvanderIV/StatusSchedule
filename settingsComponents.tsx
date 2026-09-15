@@ -266,6 +266,16 @@ function JsonEditor({ rules }: { rules: ScheduleRule[]; }) {
 function ActiveRuleSummary({ rules }: { rules: ScheduleRule[]; }) {
     const active = resolveActiveRule(rules, new Date());
 
+    // Worth distinguishing from "nothing matches right now", which reads as though the plugin
+    // is broken when the real answer is that nothing has been switched on yet
+    if (!rules.some(rule => rule.enabled)) {
+        return (
+            <Paragraph>
+                No rules are switched on, so your status is never touched. Turn one on to start.
+            </Paragraph>
+        );
+    }
+
     if (active === null) {
         return (
             <Paragraph>

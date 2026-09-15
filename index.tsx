@@ -90,7 +90,7 @@ export default definePlugin({
     name: "StatusSchedule",
     description: "Automatically sets your Discord status from time-of-day rules, so you stop looking online at 3am",
     tags: ["Activity", "Privacy", "Utility"],
-    authors: [{ name: "Evan Minich", id: 0n }],
+    authors: [{ name: "Evan Minich", id: 628373174001860628n }],
     dependencies: ["UserSettingsAPI"],
     settings,
 
