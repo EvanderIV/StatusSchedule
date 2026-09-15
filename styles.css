@@ -1,0 +1,102 @@
+.vc-statusSchedule-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5em;
+    margin-bottom: 1em;
+}
+
+.vc-statusSchedule-rules {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5em;
+}
+
+.vc-statusSchedule-rule {
+    padding: 0.75em;
+}
+
+.vc-statusSchedule-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5em;
+}
+
+.vc-statusSchedule-summary-main {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    flex: 1 1 8em;
+    min-width: 0;
+}
+
+.vc-statusSchedule-summary-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vc-statusSchedule-summary-meta {
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.vc-statusSchedule-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: inline-block;
+}
+
+.vc-statusSchedule-status-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5em;
+}
+
+.vc-statusSchedule-editor {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.5em 1em;
+    align-items: center;
+    margin-top: 0.75em;
+    padding-top: 0.75em;
+    border-top: thin solid var(--background-modifier-accent);
+}
+
+.vc-statusSchedule-days {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25em;
+}
+
+.vc-statusSchedule-error {
+    display: block;
+    margin-top: 0.25em;
+    color: var(--text-feedback-critical);
+}
+
+.vc-statusSchedule-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5em;
+    margin-top: 0.5em;
+}
+
+.vc-statusSchedule-json {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5em;
+    width: 100%;
+}
+
+.vc-statusSchedule-json-input {
+    font-family: var(--font-code, monospace);
+}
+
+.vc-statusSchedule-json-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5em;
+}
