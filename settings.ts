@@ -63,6 +63,11 @@ export const settings = definePluginSettings({
         description: "Hold a status you set by hand until the next scheduled transition, instead of overwriting it",
         default: true
     },
+    restoreStatusAfterRule: {
+        type: OptionType.BOOLEAN,
+        description: "When a rule's window ends and no other rule takes over, go back to the status you had before it started",
+        default: true
+    },
     notifyOnScheduledChange: {
         type: OptionType.BOOLEAN,
         description: "Show a toast when the schedule changes your status",

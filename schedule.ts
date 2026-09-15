@@ -73,14 +73,24 @@ export function resolveActiveRule(rules: readonly ScheduleRule[], date: Date): S
 
 /** Remembers which rule was in force when the user took manual control. */
 export interface ManualOverride {
+    /** The rule the plugin was enforcing when the change happened, or null if it was enforcing none. */
     ruleId: string | null;
+    /** The status it had applied at that point. */
     status: PresenceStatus | null;
 }
 
 export interface ScheduleState {
     /** The status the plugin itself last set -- what we expect to still find in place. */
     lastAppliedStatus: PresenceStatus | null;
+    /** The rule that produced `lastAppliedStatus`, so a later manual change can be scoped to it. */
+    lastAppliedRuleId: string | null;
     manualOverride: ManualOverride | null;
+    /**
+     * The status that was in force before any rule took over, restored once the rules stop
+     * covering the current moment. Captured on the no-rule -> rule edge only, so a chain of
+     * back-to-back rules still unwinds to what was there before the first of them.
+     */
+    restorePoint: PresenceStatus | null;
 }
 
 export interface ScheduleInput {
@@ -89,13 +99,20 @@ export interface ScheduleInput {
     /** The client's actual status, or null if it could not be read. */
     currentStatus: PresenceStatus | null;
     respectManualOverride: boolean;
+    restoreStatusAfterRule: boolean;
 }
 
 export type ScheduleDecision =
     | { type: "hold"; reason: "no-matching-rule" | "manual-override" | "already-applied"; }
-    | { type: "apply"; rule: ScheduleRule; };
+    | { type: "apply"; rule: ScheduleRule; }
+    | { type: "restore"; status: PresenceStatus; };
 
-export const INITIAL_STATE: ScheduleState = { lastAppliedStatus: null, manualOverride: null };
+export const INITIAL_STATE: ScheduleState = {
+    lastAppliedStatus: null,
+    lastAppliedRuleId: null,
+    manualOverride: null,
+    restorePoint: null
+};
 
 /**
  * The whole scheduling decision, as a pure function of the previous state and the world.
@@ -108,11 +125,13 @@ export const INITIAL_STATE: ScheduleState = { lastAppliedStatus: null, manualOve
  * landing mid-write cannot mistake the plugin's own change for a manual one.
  */
 export function decideNextAction(state: ScheduleState, input: ScheduleInput): { decision: ScheduleDecision; state: ScheduleState; } {
-    const { rules, now, currentStatus, respectManualOverride } = input;
+    const { rules, now, currentStatus, respectManualOverride, restoreStatusAfterRule } = input;
 
     const active = resolveActiveRule(rules, now);
     const { lastAppliedStatus } = state;
-    let { manualOverride } = state;
+    let { manualOverride, restorePoint } = state;
+
+    if (!restoreStatusAfterRule) restorePoint = null;
 
     if (!respectManualOverride) {
         // Naive mode: the matching rule is enforced on every tick
@@ -123,18 +142,24 @@ export function decideNextAction(state: ScheduleState, input: ScheduleInput): { 
             && currentStatus !== lastAppliedStatus;
 
         if (manualOverride === null && changedElsewhere) {
-            manualOverride = { ruleId: active?.id ?? null, status: active?.status ?? null };
+            // Scoped to the rule the plugin was actually enforcing, not to whatever happens to be
+            // due now: a status picked while nothing was scheduled must not veto the next rule.
+            manualOverride = { ruleId: state.lastAppliedRuleId, status: lastAppliedStatus };
+            // The user has just made a newer, explicit choice than the one we were holding, so
+            // restoring the older status when the rule lapses would undo what they asked for
+            restorePoint = null;
         }
 
         if (manualOverride !== null) {
-            const stillSameRule = (active?.id ?? null) === manualOverride.ruleId
-                && (active?.status ?? null) === manualOverride.status;
+            const sameRuleStillInForce = manualOverride.ruleId !== null
+                && manualOverride.ruleId === (active?.id ?? null)
+                && manualOverride.status === (active?.status ?? null);
 
             // Hold until the rule in force actually changes, then resume automatic control
-            if (stillSameRule) {
+            if (sameRuleStillInForce) {
                 return {
                     decision: { type: "hold", reason: "manual-override" },
-                    state: { lastAppliedStatus, manualOverride }
+                    state: { ...state, manualOverride, restorePoint }
                 };
             }
 
@@ -143,25 +168,48 @@ export function decideNextAction(state: ScheduleState, input: ScheduleInput): { 
     }
 
     if (active === null) {
+        // The rules have stopped covering this moment. Put back whatever was in force before they
+        // started, rather than leaving the last rule's status stranded.
+        if (restorePoint !== null) {
+            const status = restorePoint;
+
+            return {
+                decision: currentStatus === status
+                    ? { type: "hold", reason: "already-applied" }
+                    : { type: "restore", status },
+                state: { lastAppliedStatus: status, lastAppliedRuleId: null, manualOverride, restorePoint: null }
+            };
+        }
+
         return {
             decision: { type: "hold", reason: "no-matching-rule" },
-            state: { lastAppliedStatus, manualOverride }
+            // Nothing is being enforced, so the plugin deliberately forgets what it last set.
+            // Otherwise a status the user picks now still reads as a difference later, and would
+            // register as an override against whichever rule next falls due.
+            state: { lastAppliedStatus: null, lastAppliedRuleId: null, manualOverride, restorePoint: null }
         };
     }
+
+    // Crossing from uncovered time into a rule: remember what we are displacing. Only on that
+    // edge, so A -> B -> uncovered still unwinds to what preceded A rather than to A's status.
+    if (restoreStatusAfterRule && restorePoint === null && currentStatus !== null) {
+        restorePoint = currentStatus;
+    }
+
+    const next: ScheduleState = {
+        lastAppliedStatus: active.status,
+        lastAppliedRuleId: active.id,
+        manualOverride,
+        restorePoint
+    };
 
     if (currentStatus === active.status) {
         // Already correct, possibly because the user got there first. Recording it keeps override
         // detection honest on the next tick without a redundant write.
-        return {
-            decision: { type: "hold", reason: "already-applied" },
-            state: { lastAppliedStatus: active.status, manualOverride }
-        };
+        return { decision: { type: "hold", reason: "already-applied" }, state: next };
     }
 
-    return {
-        decision: { type: "apply", rule: active },
-        state: { lastAppliedStatus: active.status, manualOverride }
-    };
+    return { decision: { type: "apply", rule: active }, state: next };
 }
 
 /** Human readable day summary, e.g. "Every day", "Weekdays", "Mon, Wed, Fri" */

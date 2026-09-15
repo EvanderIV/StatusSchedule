@@ -34,8 +34,14 @@ A rule is a window of local time, a status, and the weekdays it applies on.
 - **Overlapping rules** are resolved by priority, highest first. That is how a DND focus block at
   09:00–11:00 (priority 10) beats a broad "Online during the day" rule (priority 0). Rules with
   equal priority are resolved by whichever comes first in the list.
-- **If no rule matches, nothing happens.** There is deliberately no implicit fallback status. If
-  you want guaranteed coverage, add a rule with every day selected, an identical start and end,
+- **When a window ends with no rule to take over,** your previous status comes back — whatever you
+  were on before the rule started. So a one-off "DND 09:00–11:00" returns you to Online at 11:00
+  without needing a second rule covering the rest of the day. Turn off **Restore status after a
+  rule ends** if you would rather the last rule's status simply stay put.
+- **A chain of back-to-back rules unwinds to what preceded the first of them.** If Online → Focus
+  (DND) → Midday (Idle) → nothing, you end up Online, not DND.
+- **No rule has ever matched, and none does now?** Nothing happens. There is no implicit default
+  status. For guaranteed coverage, add a rule with every day selected, an identical start and end,
   and the lowest priority.
 - **Days are matched against the day the clock currently reads.** A `23:00 → 07:30` rule enabled
   only on Monday covers Monday 00:00–07:30 and Monday 23:00–24:00 — it does not run into Tuesday
@@ -51,6 +57,11 @@ automatic control resumes.
 Turn off **Respect manual status changes** if you would rather the schedule always win; the
 current rule is then re-applied on every check.
 
+A status you pick while *no* rule is running is simply yours — the plugin isn't enforcing anything
+at that point, so it takes no notice and the next rule still falls due normally. Picking a status
+during a rule's window also cancels the restore described above, since your choice is the more
+recent one.
+
 ## Settings
 
 | Setting | Default | What it does |
@@ -58,6 +69,7 @@ current rule is then re-applied on every check.
 | Schedule | two disabled examples | The rule list, plus an "edit as JSON" escape hatch |
 | How often to check the schedule | 30 seconds | Clamped to a 5 second minimum |
 | Hold a status you set by hand | on | The manual-override behaviour above |
+| Restore status after a rule ends | on | Go back to the status you had before the rule started |
 | Show a toast when the schedule changes your status | on | Confirms changes actually happened |
 
 Failures always toast, regardless of that last setting, so a broken plugin never fails silently.

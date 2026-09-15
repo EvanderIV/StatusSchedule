@@ -157,8 +157,8 @@ describe("decideNextAction", () => {
     const rules = [daytime, overnight];
 
     /** Runs a tick the way index.tsx does, threading state through and reporting what happened. */
-    function tick(state: ScheduleState, now: Date, currentStatus: PresenceStatus | null, respectManualOverride = true) {
-        return decideNextAction(state, { rules, now, currentStatus, respectManualOverride });
+    function tick(state: ScheduleState, now: Date, currentStatus: PresenceStatus | null, respectManualOverride = true, restoreStatusAfterRule = true) {
+        return decideNextAction(state, { rules, now, currentStatus, respectManualOverride, restoreStatusAfterRule });
     }
 
     it("applies the matching rule on the first tick, whatever the status happens to be", () => {
@@ -180,10 +180,104 @@ describe("decideNextAction", () => {
             rules: [rule({ start: "09:00", end: "17:00" })],
             now: at(1, 20, 0),
             currentStatus: "dnd",
-            respectManualOverride: true
+            respectManualOverride: true,
+            restoreStatusAfterRule: true
         });
 
         assert.deepEqual(decision, { type: "hold", reason: "no-matching-rule" });
+    });
+
+    describe("restoring the previous status", () => {
+        // A single ad-hoc rule with uncovered time either side of it
+        const focus = rule({ id: "focus", label: "Focus", status: "dnd", start: "09:00", end: "11:00" });
+
+        function run(state: ScheduleState, now: Date, currentStatus: PresenceStatus | null, restoreStatusAfterRule = true, ruleSet = [focus]) {
+            return decideNextAction(state, { rules: ruleSet, now, currentStatus, respectManualOverride: true, restoreStatusAfterRule });
+        }
+
+        it("puts back what was there before once the window ends", () => {
+            // 08:00, uncovered, the user is Online
+            let { decision, state } = run(INITIAL_STATE, at(1, 8, 0), "online");
+            assert.deepEqual(decision, { type: "hold", reason: "no-matching-rule" });
+
+            // 09:00, Focus takes over and DND is applied
+            ({ decision, state } = run(state, at(1, 9, 0), "online"));
+            assert.deepEqual(decision, { type: "apply", rule: focus });
+            assert.equal(state.restorePoint, "online", "remembered what it displaced");
+
+            // 11:00, the window closes with nothing to take over
+            ({ decision, state } = run(state, at(1, 11, 0), "dnd"));
+            assert.deepEqual(decision, { type: "restore", status: "online" });
+            assert.equal(state.lastAppliedStatus, "online");
+            assert.equal(state.restorePoint, null, "spent");
+        });
+
+        it("restores only once, then leaves the status alone", () => {
+            let { state } = run(INITIAL_STATE, at(1, 9, 0), "online");
+            state = run(state, at(1, 11, 0), "dnd").state;
+
+            // The user is free to change status afterwards without it being undone again
+            const { decision } = run(state, at(1, 14, 0), "idle");
+            assert.deepEqual(decision, { type: "hold", reason: "no-matching-rule" });
+        });
+
+        it("unwinds to what preceded the first rule of a back-to-back chain", () => {
+            const morning = rule({ id: "morning", label: "Morning", status: "dnd", start: "09:00", end: "11:00" });
+            const midday = rule({ id: "midday", label: "Midday", status: "idle", start: "11:00", end: "13:00" });
+            const chain = [morning, midday];
+
+            // Online beforehand, then morning -> midday hand over with no gap
+            let { state } = run(INITIAL_STATE, at(1, 9, 0), "online", true, chain);
+            state = run(state, at(1, 11, 0), "dnd", true, chain).state;
+            assert.equal(state.restorePoint, "online", "not overwritten by the handover");
+
+            // 13:00, the chain ends -- back to Online, not to the first rule's DND
+            const { decision } = run(state, at(1, 13, 0), "idle", true, chain);
+            assert.deepEqual(decision, { type: "restore", status: "online" });
+        });
+
+        it("captures a fresh restore point the next time the rule comes round", () => {
+            let { state } = run(INITIAL_STATE, at(1, 9, 0), "online");
+            state = run(state, at(1, 11, 0), "dnd").state;
+
+            // The next day the user starts out Idle instead
+            state = run(state, at(2, 9, 0), "idle").state;
+            assert.equal(state.restorePoint, "idle");
+
+            const { decision } = run(state, at(2, 11, 0), "dnd");
+            assert.deepEqual(decision, { type: "restore", status: "idle" });
+        });
+
+        it("does not undo a status the user chose during the window", () => {
+            let { state } = run(INITIAL_STATE, at(1, 9, 0), "online");
+            assert.equal(state.restorePoint, "online");
+
+            // The user picks Invisible mid-window, which is a newer choice than the saved one
+            state = run(state, at(1, 9, 30), "invisible").state;
+            assert.equal(state.restorePoint, null, "dropped in favour of the manual choice");
+
+            const { decision } = run(state, at(1, 11, 0), "invisible");
+            assert.deepEqual(decision, { type: "hold", reason: "no-matching-rule" });
+        });
+
+        it("leaves the status stranded when the setting is off", () => {
+            const { state } = run(INITIAL_STATE, at(1, 9, 0), "online", false);
+            assert.equal(state.restorePoint, null, "nothing captured");
+
+            const { decision } = run(state, at(1, 11, 0), "dnd", false);
+            assert.deepEqual(decision, { type: "hold", reason: "no-matching-rule" });
+        });
+
+        it("skips the write when the status already matches the restore point", () => {
+            // A rule that sets the status the user was already on, so the restore is a no-op
+            const sameStatus = rule({ id: "same", label: "Same", status: "online", start: "09:00", end: "11:00" });
+
+            const { state } = run(INITIAL_STATE, at(1, 9, 0), "online", true, [sameStatus]);
+            assert.equal(state.restorePoint, "online");
+
+            const { decision } = run(state, at(1, 11, 0), "online", true, [sameStatus]);
+            assert.deepEqual(decision, { type: "hold", reason: "already-applied" });
+        });
     });
 
     describe("with respectManualOverride on", () => {
@@ -215,16 +309,21 @@ describe("decideNextAction", () => {
             assert.equal(result.state.lastAppliedStatus, "invisible");
         });
 
-        it("treats a status change during an uncovered stretch as an override too", () => {
+        it("does not let a status picked during uncovered time veto the next rule", () => {
             const onlyDaytime = [daytime];
-            let { state } = decideNextAction(INITIAL_STATE, { rules: onlyDaytime, now: at(1, 12, 0), currentStatus: "idle", respectManualOverride: true });
+            const run = (state: ScheduleState, now: Date, currentStatus: PresenceStatus) =>
+                decideNextAction(state, { rules: onlyDaytime, now, currentStatus, respectManualOverride: true, restoreStatusAfterRule: false });
 
-            // User goes invisible after the Daytime window has closed
-            state = decideNextAction(state, { rules: onlyDaytime, now: at(1, 23, 30), currentStatus: "invisible", respectManualOverride: true }).state;
-            assert.deepEqual(state.manualOverride, { ruleId: null, status: null });
+            let { state } = run(INITIAL_STATE, at(1, 12, 0), "idle");
 
-            // Next morning the Daytime rule comes back around and takes over again
-            const result = decideNextAction(state, { rules: onlyDaytime, now: at(2, 8, 0), currentStatus: "invisible", respectManualOverride: true });
+            // User goes invisible after the Daytime window has closed. Nothing is being enforced
+            // then, so there is no rule for an override to protect.
+            state = run(state, at(1, 23, 30), "invisible").state;
+            assert.equal(state.manualOverride, null);
+
+            // Next morning Daytime falls due again and must actually take over, rather than being
+            // held off by last night's change
+            const result = run(state, at(2, 8, 0), "invisible");
             assert.deepEqual(result.decision, { type: "apply", rule: daytime });
         });
 

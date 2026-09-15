@@ -38,26 +38,34 @@ export async function evaluateSchedule() {
         rules: settings.store.rules,
         now: new Date(),
         currentStatus,
-        respectManualOverride: settings.store.respectManualOverride
+        respectManualOverride: settings.store.respectManualOverride,
+        restoreStatusAfterRule: settings.store.restoreStatusAfterRule
     });
 
     state = next;
     logOverrideChange(previous, next, currentStatus);
 
-    if (decision.type !== "apply") return;
+    if (decision.type === "hold") return;
 
-    const { rule } = decision;
+    const status = decision.type === "apply" ? decision.rule.status : decision.status;
+    const because = decision.type === "apply"
+        ? `(${decision.rule.label})`
+        : "(schedule ended)";
 
-    if (await applyStatus(rule.status)) {
-        logger.info(`Set status to "${rule.status}" (${rule.label})`);
+    if (await applyStatus(status)) {
+        logger.info(`Set status to "${status}" ${because}`);
 
         if (settings.store.notifyOnScheduledChange) {
-            showToast(`Status set to ${STATUS_META[rule.status].label} (${rule.label})`, Toasts.Type.SUCCESS);
+            const message = decision.type === "apply"
+                ? `Status set to ${STATUS_META[status].label} (${decision.rule.label})`
+                : `Status restored to ${STATUS_META[status].label}`;
+
+            showToast(message, Toasts.Type.SUCCESS);
         }
     } else {
         // The write never landed, so don't claim it as ours
         state = { ...state, lastAppliedStatus: previous.lastAppliedStatus };
-        showToast(`StatusSchedule could not set your status to ${STATUS_META[rule.status].label}. See the console.`, Toasts.Type.FAILURE);
+        showToast(`StatusSchedule could not set your status to ${STATUS_META[status].label}. See the console.`, Toasts.Type.FAILURE);
     }
 }
 
